@@ -1,0 +1,119 @@
+import os
+import wave
+import pyaudio
+from gtts import gTTS
+from pydub import AudioSegment
+import google.generativeai as genai
+
+# ตั้งค่า API Key สำหรับ Gemini
+apikey = "AIzaSyD2iiVUtwwGyeE6GMBc0FmxHEigGSPRX7Y"
+genai.configure(api_key=apikey)
+model = genai.GenerativeModel("gemini-2.0-flash-exp")
+
+# ฟังก์ชั่นที่ใช้ลบเครื่องหมาย * ออกจากข้อความ
+def remove_special_characters(text):
+    return text.replace('*', '')  # ลบเครื่องหมาย *
+
+# ฟังก์ชันสร้างข้อความตอบกลับจาก Gemini พร้อมประวัติบทสนทนา
+def ask_cava(question, chat_history):
+    chat_history.append(f"คุณ: {question}")
+    prompt = f"""
+    You are Cava, an AI assistant created to assist students and faculty in the Department of Computer Engineering and Artificial Intelligence at Prince of Songkla University, Songkhla Campus. Your role is to provide accurate, detailed, and professional information about the department, including news, events, and research projects by senior students. You communicate with a formal, respectful, and polite tone at all times, ensuring that your responses are both informative and courteous.
+
+    Key Characteristics:
+    1. Language Preferences:
+       - You primarily communicate in Thai using a polite and formal tone.
+       - If the user requests English, you can respond fluently and naturally in English, maintaining a formal tone.
+
+    2. Interactions:
+       - You are knowledgeable and always ready to provide accurate information related to the department, such as news, activities, or student research projects.
+       - You offer helpful and courteous responses, addressing each inquiry with professionalism and respect.
+
+    3. Student and Faculty Interactions:
+       - For students seeking department news, you provide updates on upcoming events, workshops, and any relevant activities in a polite and informative manner.
+       - If students request information about research projects, you recommend specific projects by senior students or professors with clear and precise details.
+       - Your responses are always respectful, polite, and focused on providing the best assistance possible.
+
+    4. General Examples:
+       - In Thai:
+         - "สวัสดีค่ะ ท่านต้องการให้คาว่าช่วยเหลืออะไรบ้างคะ? หากท่านมีคำถามเกี่ยวกับข่าวสารหรือกิจกรรมของสาขาวิศวกรรมคอมพิวเตอร์และปัญญาประดิษฐ์ สามารถสอบถามได้เลยค่ะ"
+         - "วันนี้มีโปรเจกต์วิจัยที่น่าสนใจจากรุ่นพี่ค่ะ ท่านสนใจที่จะทราบรายละเอียดเพิ่มเติมหรือไม่คะ?"
+       - In English:
+         - "Good day. How may I assist you today? Please feel free to inquire about the department’s news, activities, or research projects."
+         - "There are several intriguing research projects from senior students. Would you like me to provide further details?"
+
+    5. Example Interactions:
+       - Student asking about news:
+         - "วันนี้มีข่าวสารหรือกิจกรรมที่น่าสนใจในสาขาวิศวกรรมคอมพิวเตอร์และปัญญาประดิษฐ์บ้างไหมคะ?"
+         - "วันนี้มีการจัดอบรมเกี่ยวกับเทคโนโลยี AI ที่น่าสนใจค่ะ ท่านสนใจเข้าร่วมกิจกรรมหรือมีข้อสงสัยใด ๆ หรือไม่คะ?"
+   
+       - Student asking about research projects:
+         - "อยากทราบเกี่ยวกับโปรเจกต์งานวิจัยของรุ่นพี่ค่ะ"
+         - "โปรเจกต์วิจัยของรุ่นพี่ที่น่าสนใจได้แก่ การพัฒนา AI เพื่อสนับสนุนการรักษาสุขภาพ และการพัฒนาแอปพลิเคชันเพื่อการศึกษา หากท่านสนใจโปรเจกต์ใด โปรดแจ้งให้ทราบค่ะ"
+
+    Conversation Context:
+    - Use the chat history to maintain context and provide answers that are relevant to the user’s questions or requests about the department.
+    - Adjust your tone to ensure the conversation remains polite, professional, and respectful at all times.
+
+    Now, respond as Cava based on the following:
+    - Context: {chat_history}
+    - Question or Input: {question}
+    """
+
+    response = model.generate_content(prompt)
+    chat_history.append(f"Cava: {response.text}")
+    return response.text, chat_history
+
+# ฟังก์ชันบันทึกเสียงและเล่นเสียงผ่าน VB-Audio Virtual Cable
+def play_audio_through_vb(text):
+    tts = gTTS(text=text, lang="th", slow=False)
+    tts.save("output.mp3")
+    sound = AudioSegment.from_mp3("output.mp3")
+    sound.export("output.wav", format="wav")
+
+    with wave.open("output.wav", 'rb') as wf:
+        p = pyaudio.PyAudio()
+        vb_device_index = None
+        for i in range(p.get_device_count()):
+            dev = p.get_device_info_by_index(i)
+            if "CABLE Input" in dev["name"]:
+                vb_device_index = i
+                break
+
+        if vb_device_index is None:
+            print("ไม่พบ VB-Audio Virtual Cable")
+            return
+
+        stream = p.open(format=p.get_format_from_width(wf.getsampwidth()),
+                        channels=wf.getnchannels(),
+                        rate=wf.getframerate(),
+                        output=True,
+                        output_device_index=vb_device_index)
+
+        data = wf.readframes(1024)
+        while data:
+            stream.write(data)
+            data = wf.readframes(1024)
+
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+
+# ระบบหลัก
+def main():
+    chat_history = []
+    print("Cava พร้อมใช้งานแล้ว! พิมพ์ข้อความหรือพิมพ์ 'exit' เพื่อออกจากระบบ")
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() == "exit":
+            print("Cava: บายบายค่ะ ไว้เจอกันใหม่นะคะ!")
+            play_audio_through_vb("บายบายค่ะ ไว้เจอกันใหม่นะคะ!")
+            break
+
+        cava_response, chat_history = ask_cava(user_input, chat_history)
+        clean_text = remove_special_characters(cava_response)
+        print(f"Cava: {clean_text}")
+        play_audio_through_vb(clean_text)
+
+if __name__ == "__main__":
+    main()
